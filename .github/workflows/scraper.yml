@@ -2,14 +2,17 @@ name: SPSC Job Scraper
 
 on:
   schedule:
-    # Run once per day at 06:00 AM IST (00:30 UTC)
-    - cron: '30 0 * * *'
+    - cron: '30 0 * * *' # 06:00 AM IST
   workflow_dispatch:
 
 jobs:
   scrape-jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: backend
 
     steps:
       - name: Checkout code
@@ -23,11 +26,13 @@ jobs:
           cache-dependency-path: backend/package-lock.json
 
       - name: Install backend dependencies
-        working-directory: backend
         run: npm ci
 
+      # 🔑 THIS IS THE MISSING PIECE
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
       - name: Run scraper
-        working-directory: backend
         env:
           NODE_ENV: production
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
