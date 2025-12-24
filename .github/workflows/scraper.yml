@@ -2,7 +2,8 @@ name: SPSC Job Scraper
 
 on:
   schedule:
-    - cron: '30 0 * * *'   # 06:00 AM IST
+    # Runs once per day at 06:00 AM IST (00:30 UTC)
+    - cron: '30 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -11,20 +12,38 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      # 1️⃣ Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      # 2️⃣ Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
 
-      - name: Install dependencies
+      # 3️⃣ Install backend dependencies (IMPORTANT)
+      - name: Install backend dependencies
+        working-directory: backend
         run: npm ci
 
+      # 4️⃣ Run scraper (backend only)
       - name: Run scraper
+        working-directory: backend
         env:
           NODE_ENV: production
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
           ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
         run: node scraper.js
+
+      # 5️⃣ Upload logs if scraper fails (debug only)
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-logs-${{ github.run_number }}
+          path: backend/logs/
+          retention-days: 7
