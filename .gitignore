@@ -1,0 +1,70 @@
+# https://dart.dev/guides/libraries/private-files
+# Created by `dart pub`
+.dart_tool/
+
+# Service account key (NEVER commit this)
+backend/serviceAccountKey.json
+functions/serviceAccountKey.json
+
+# Firebase config (generated, don't commit)
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Build outputs
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Node
+node_modules/
+package-lock.json
+
+# Android
+android/app/release/
+android/app/debug/
+android/.gradle/
+android/local.properties
+android/key.properties
+*.keystore
+*.jks
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Test coverage
+coverage/
+
+# Misc
+*.swp
+*.swo
+*~
+
+# Allow backend lockfile for CI
+!backend/package-lock.json
+
