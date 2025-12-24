@@ -1,0 +1,30 @@
+name: SPSC Job Scraper
+
+on:
+  schedule:
+    - cron: '30 0 * * *'   # 06:00 AM IST
+  workflow_dispatch:
+
+jobs:
+  scrape-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run scraper
+        env:
+          NODE_ENV: production
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
+        run: node scraper.js
