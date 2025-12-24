@@ -1,113 +1,129 @@
 /**
- * Scraper Run Metrics - STEP 4 REQUIRED
- * 
- * Every scraper run must store a summary in Firestore.
- * This enables monitoring and alerting.
+ * Scraper Run Metrics – STEP 7 Production Monitoring
+ *
+ * ONE document per run in `scraper_runs`
+ * Same document updated throughout execution
+ * Safe on crashes, retries, and GitHub Actions
  */
 
 import admin from 'firebase-admin';
 import { logInfo, logError } from './logger.js';
 
-let db;
+let db = null;
+let currentRunId = null;
 
 export function setFirestoreDb(firestoreDb) {
-    db = firestoreDb;
+  db = firestoreDb;
 }
 
 /**
- * Log scraper run summary to Firestore
- * 
- * MANDATORY: Must be called at end of every scraper run
+ * Initialize scraper run
  */
-export async function logScraperRun(metrics) {
-    if (!db) {
-        throw new Error('Firestore not initialized - call setFirestoreDb() first');
-    }
+export async function initializeRun() {
+  if (!db) throw new Error('Firestore not initialized');
 
-    const runSummary = {
-        runAt: admin.firestore.FieldValue.serverTimestamp(),
-        jobsFound: metrics.jobsFound || 0,
-        jobsSaved: metrics.jobsSaved || 0,
-        completeJobs: metrics.completeJobs || 0,
-        incompleteJobs: metrics.incompleteJobs || 0,
-        networkErrors: metrics.networkErrors || 0,
-        parseErrors: metrics.parseErrors || 0,
-        structureErrors: metrics.structureErrors || 0,
-        firestoreErrors: metrics.firestoreErrors || 0,
-        status: metrics.status || 'UNKNOWN',  // SUCCESS | PARTIAL | FAILED
-        duration: metrics.duration || 0,
-        errors: metrics.errors || []
-    };
+  currentRunId = new Date().toISOString();
 
-    try {
-        await db.collection('scraper_runs').add(runSummary);
-        logInfo('Scraper run logged to Firestore');
-    } catch (error) {
-        logError('Failed to log scraper run', error);
-        // Don't throw - logging failure shouldn't crash scraper
-    }
+  const runDoc = {
+    runId: currentRunId,
+    startedAt: admin.firestore.FieldValue.serverTimestamp(),
+    finishedAt: null,
+    status: 'running',
+    jobsFound: 0,
+    jobsInserted: 0,
+    jobsSkipped: 0,
+    parsingErrorsCount: 0,
+    fatalError: null,
+    environment: process.env.NODE_ENV || 'development'
+  };
 
-    return runSummary;
+  await db.collection('scraper_runs').doc(currentRunId).set(runDoc);
+  logInfo(`Scraper run initialized: ${currentRunId}`);
+
+  return currentRunId;
 }
 
 /**
- * Get last N scraper runs
+ * Update metrics (non-atomic batch update)
  */
-export async function getRecentRuns(limit = 10) {
-    if (!db) {
-        throw new Error('Firestore not initialized');
-    }
+export async function updateRunMetrics(updates) {
+  if (!db || !currentRunId) return;
 
-    const snapshot = await db
-        .collection('scraper_runs')
-        .orderBy('runAt', 'desc')
-        .limit(limit)
-        .get();
-
-    return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-    }));
+  try {
+    await db.collection('scraper_runs').doc(currentRunId).update(updates);
+  } catch (err) {
+    logError('Failed to update run metrics', err);
+  }
 }
 
 /**
- * Check if last N runs had zero jobs
- * Used for alerting
+ * Atomic counter increment
  */
-export async function checkConsecutiveZeroJobRuns(count = 2) {
-    const recentRuns = await getRecentRuns(count);
+export async function incrementCounter(field) {
+  if (!db || !currentRunId) return;
 
-    if (recentRuns.length < count) {
-        return false;  // Not enough data
-    }
-
-    return recentRuns.every(run => run.jobsFound === 0);
+  try {
+    await db.collection('scraper_runs').doc(currentRunId).update({
+      [field]: admin.firestore.FieldValue.increment(1)
+    });
+  } catch (err) {
+    logError(`Failed to increment ${field}`, err);
+  }
 }
 
 /**
- * Calculate run status based on metrics
+ * Finalize run
  */
-export function calculateRunStatus(metrics) {
-    // FAILED: Scraper crashed or structure changed
-    if (metrics.structureErrors > 0 || metrics.scraperCrashed) {
-        return 'FAILED';
-    }
+export async function finalizeRun(status, fatalError = null) {
+  if (!db || !currentRunId) return;
 
-    // FAILED: No jobs found unexpectedly
-    if (metrics.jobsFound === 0 && !metrics.expectedZeroJobs) {
-        return 'FAILED';
-    }
+  try {
+    await db.collection('scraper_runs').doc(currentRunId).update({
+      status,
+      fatalError,
+      finishedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
 
-    // PARTIAL: Some jobs saved, but with errors
-    if (metrics.jobsSaved > 0 && (metrics.networkErrors > 0 || metrics.parseErrors > 0)) {
-        return 'PARTIAL';
-    }
+    logInfo(`Scraper run finalized: ${currentRunId} (${status})`);
+  } catch (err) {
+    logError('Failed to finalize run', err);
+  } finally {
+    currentRunId = null;
+  }
+}
 
-    // SUCCESS: Jobs saved without critical errors
-    if (metrics.jobsSaved > 0) {
-        return 'SUCCESS';
-    }
+/**
+ * Dashboard helpers
+ */
+export async function getLatestRun() {
+  const snap = await db
+    .collection('scraper_runs')
+    .orderBy('startedAt', 'desc')
+    .limit(1)
+    .get();
 
-    // FAILED: No jobs saved
-    return 'FAILED';
+  if (snap.empty) return null;
+  return { id: snap.docs[0].id, ...snap.docs[0].data() };
+}
+
+export async function getRecentRuns(limit = 7) {
+  const snap = await db
+    .collection('scraper_runs')
+    .orderBy('startedAt', 'desc')
+    .limit(limit)
+    .get();
+
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+export async function getRunsWithErrors() {
+  const snap = await db
+    .collection('scraper_runs')
+    .where('parsingErrorsCount', '>', 0)
+    .orderBy('parsingErrorsCount', 'desc')
+    .orderBy('startedAt', 'desc')
+    .limit(20)
+    .get();
+
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
